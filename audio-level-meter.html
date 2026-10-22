@@ -1,0 +1,1012 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Audio Level Meter</title>
+<style>
+:root {
+  --bg: #0d1117; --card: #161b22; --card2: #1c2330; --line: #2b3440;
+  --text: #e6edf3; --muted: #8d99a6; --accent: #58a6ff;
+  --ok: #2ea043; --warn: #d29922; --bad: #f85149; --info: #58a6ff;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 18px; margin: 0 12px 0 0; font-weight: 650; }
+header .spacer { flex: 1; }
+button, select, input { font: inherit; color: var(--text); background: var(--card2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; font-weight: 600; }
+button.stop { background: #3d1d20; border-color: #6e2b30; }
+select { max-width: 100%; }
+input[type=number] { width: 80px; }
+#banner { margin: 12px 16px 0; padding: 12px 16px; border-radius: 8px; font-size: 18px; font-weight: 650;
+  background: var(--card); border: 1px solid var(--line); display: flex; gap: 12px; align-items: center; }
+#banner .dot { width: 16px; height: 16px; border-radius: 50%; background: var(--muted); flex: none; }
+#banner.ok .dot { background: var(--ok); } #banner.warn .dot { background: var(--warn); }
+#banner.bad { border-color: var(--bad); } #banner.bad .dot { background: var(--bad); animation: blink 1s steps(2) infinite; }
+#banner small { font-weight: 400; color: var(--muted); font-size: 14px; }
+@keyframes blink { 50% { opacity: .2; } }
+#errors { margin: 12px 16px 0; color: var(--bad); }
+#errors:empty { display: none; }
+main { display: grid; gap: 14px; padding: 14px 16px; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card h2 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.card h2 .st { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.card.running h2 .st { background: var(--ok); }
+.card .sub { color: var(--muted); font-size: 12.5px; margin-top: -6px; }
+.controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.controls select.dev { flex: 1 1 180px; min-width: 0; }
+details.settings { background: var(--card2); border-radius: 6px; padding: 6px 10px; }
+details.settings summary { cursor: pointer; color: var(--muted); }
+details.settings .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+details.settings p { margin: 6px 0; color: var(--muted); font-size: 12.5px; }
+.body { display: grid; grid-template-columns: 150px 1fr; gap: 12px; }
+canvas { display: block; width: 100%; }
+canvas.meter { height: 300px; background: #0a0d12; border-radius: 6px; }
+canvas.hist { height: 120px; background: #0a0d12; border-radius: 6px; }
+.nums { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 6px; align-content: start; }
+.num { background: var(--card2); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+.num .k { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
+.num .v { font-size: 20px; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.num .v small { font-size: 12px; color: var(--muted); font-weight: 400; }
+.num.big { grid-column: span 2; }
+.num.big .v { font-size: 34px; }
+.num.ok .v { color: var(--ok); } .num.warn .v { color: var(--warn); } .num.bad .v { color: var(--bad); }
+.advice { display: flex; flex-direction: column; gap: 6px; }
+.adv { border-left: 4px solid var(--muted); background: var(--card2); border-radius: 4px; padding: 6px 10px; }
+.adv b { display: block; }
+.adv span { color: #c5ced8; font-size: 13px; }
+.adv.ok { border-color: var(--ok); } .adv.warn { border-color: var(--warn); }
+.adv.bad { border-color: var(--bad); } .adv.info { border-color: var(--info); }
+.idle { color: var(--muted); padding: 30px 0; text-align: center; }
+#logwrap { margin: 0 16px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+#logwrap h2 { font-size: 15px; margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
+#log { max-height: 220px; overflow: auto; font: 12.5px/1.5 ui-monospace, Consolas, monospace; }
+#log div.bad { color: var(--bad); } #log div.warn { color: var(--warn); } #log div.ok { color: var(--ok); }
+#help { margin: 0 16px 24px; color: var(--muted); font-size: 13px; }
+#help summary { cursor: pointer; color: var(--text); }
+@media (max-width: 520px) {
+  main { grid-template-columns: 1fr; padding: 12px 16px; }
+  .body { grid-template-columns: 110px 1fr; }
+  .num.big .v { font-size: 26px; }
+  .num .v { font-size: 16px; white-space: normal; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Audio Level Meter</h1>
+  <button id="enable" class="primary">Enable audio inputs</button>
+  <button id="resetAll" title="Clear all measurements and start fresh (e.g. at the start of a service)">Reset all</button>
+  <span class="spacer"></span>
+  <button id="exportLog">Export log (CSV)</button>
+</header>
+<div id="banner" class="idle"><span class="dot"></span><span id="bannerText">Click “Enable audio inputs”, then pick an input for each meter.</span></div>
+<div id="errors"></div>
+<main id="panels"></main>
+<section id="logwrap">
+  <h2>Event log <button id="clearLog" style="font-size:12px;padding:2px 8px">Clear</button></h2>
+  <div id="log"></div>
+</section>
+<details id="help">
+  <summary>How this meter measures, and which targets it uses</summary>
+  <p><b>LUFS</b> (loudness units) is how YouTube, Facebook and broadcasters measure loudness (ITU-R BS.1770 / EBU R128). <b>Short-term</b> is the last 3 seconds, <b>momentary</b> is the last 0.4 seconds, and <b>integrated</b> is the average since you last pressed Reset. Press Reset at the start of each service.</p>
+  <p><b>True peak (dBTP)</b> catches peaks that fall between samples, which turn into crackle after the platform re-encodes your audio. Keep stream true peaks below −1 dBTP.</p>
+  <p><b>LRA</b> (loudness range) shows how much the level swings, for example between speaking and full-band songs. Above about 15 LU, viewers end up reaching for their volume control.</p>
+  <p>The house mix meter reads the electrical level of your mix. To measure how loud the room actually is, use the Room meter with a microphone and calibrate it against an SPL meter or phone SPL app.</p>
+  <p>Before using any reading, set the input in your computer's sound settings to a fixed level. Turn off all “enhancements”, automatic gain and noise suppression. This page asks the browser to turn them off, but some drivers keep them on.</p>
+</details>
+
+<script>
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ *  DSP — runs on the audio thread (AudioWorklet)                      *
+ * ------------------------------------------------------------------ */
+const WORKLET_SRC = String.raw`
+// ITU-R BS.1770-4 Annex 2: 4x oversampling polyphase FIR for true-peak.
+const TP = [
+  [ 0.0017089843750, 0.0109863281250,-0.0196533203125, 0.0332031250000,-0.0594482421875, 0.1373291015625, 0.9721679687500,-0.1022949218750, 0.0476074218750,-0.0266113281250, 0.0148925781250,-0.0083007812500],
+  [-0.0291748046875, 0.0292968750000,-0.0517578125000, 0.0891113281250,-0.1665039062500, 0.4650878906250, 0.7797851562500,-0.2003173828125, 0.1015625000000,-0.0582275390625, 0.0330810546875,-0.0189208984375],
+  [-0.0189208984375, 0.0330810546875,-0.0582275390625, 0.1015625000000,-0.2003173828125, 0.7797851562500, 0.4650878906250,-0.1665039062500, 0.0891113281250,-0.0517578125000, 0.0292968750000,-0.0291748046875],
+  [-0.0083007812500, 0.0148925781250,-0.0266113281250, 0.0476074218750,-0.1022949218750, 0.9721679687500, 0.1373291015625,-0.0594482421875, 0.0332031250000,-0.0196533203125, 0.0109863281250, 0.0017089843750]
+];
+const TPN = 12;
+
+// BS.1770 K-weighting (pre-filter shelf + RLB high-pass) for any sample rate.
+function kWeighting(fs) {
+  let f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
+  let K = Math.tan(Math.PI * f0 / fs);
+  const Vh = Math.pow(10, G / 20), Vb = Math.pow(Vh, 0.4996667741545416);
+  let a0 = 1 + K / Q + K * K;
+  const s1 = { b0: (Vh + Vb * K / Q + K * K) / a0, b1: 2 * (K * K - Vh) / a0, b2: (Vh - Vb * K / Q + K * K) / a0,
+               a1: 2 * (K * K - 1) / a0, a2: (1 - K / Q + K * K) / a0 };
+  f0 = 38.13547087602444; Q = 0.5003270373238773;
+  K = Math.tan(Math.PI * f0 / fs);
+  a0 = 1 + K / Q + K * K;
+  const s2 = { b0: 1, b1: -2, b2: 1, a1: 2 * (K * K - 1) / a0, a2: (1 - K / Q + K * K) / a0 };
+  return [s1, s2];
+}
+
+// IEC 61672 A-weighting as six first-order bilinear sections (pre-warped poles),
+// normalised to 0 dB at 1 kHz.
+function aWeighting(fs) {
+  const K = 2 * fs;
+  const pw = f => 2 * fs * Math.tan(Math.PI * f / fs);
+  const hp = f => { const w = pw(f), d = K + w; return { b0: K / d, b1: -K / d, a1: (w - K) / d }; };
+  const lp = f => { const w = pw(f), d = K + w; return { b0: w / d, b1: w / d, a1: (w - K) / d }; };
+  const secs = [hp(20.598997), hp(20.598997), hp(107.65265), hp(737.86223), lp(12194.217), lp(12194.217)];
+  const om = 2 * Math.PI * 1000 / fs;
+  let mag = 1;
+  for (const s of secs) {
+    const nr = s.b0 + s.b1 * Math.cos(om), ni = -s.b1 * Math.sin(om);
+    const dr = 1 + s.a1 * Math.cos(om), di = -s.a1 * Math.sin(om);
+    mag *= Math.hypot(nr, ni) / Math.hypot(dr, di);
+  }
+  return { secs, gain: 1 / mag };
+}
+
+class LevelMeter extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const o = (options && options.processorOptions) || {};
+    this.sel = o.channels || [0, 1];
+    this.blockLen = Math.max(1, Math.round(sampleRate * 0.1)); // 100 ms blocks
+    this.kw = kWeighting(sampleRate);
+    this.aw = aWeighting(sampleRate);
+    this.port.onmessage = e => { if (e.data && e.data.channels) { this.sel = e.data.channels; this.reset(); } };
+    this.reset();
+  }
+  reset() {
+    this.ch = this.sel.map(() => ({
+      kz: new Float64Array(8), az: new Float64Array(12), hist: new Float64Array(TPN * 2), hi: 0, run: 0,
+      kSum: 0, sq: 0, aSum: 0, pk: 0, tp: 0, clip: 0
+    }));
+    this.xy = 0; this.xx = 0; this.yy = 0; this.count = 0;
+  }
+  runChannel(st, x, from, to) {
+    const [s1, s2] = this.kw, kz = st.kz, az = st.az, secs = this.aw.secs, ag = this.aw.gain, h = st.hist;
+    let kSum = st.kSum, sq = st.sq, aSum = st.aSum, pk = st.pk, tp = st.tp, run = st.run, clip = st.clip, hi = st.hi;
+    for (let i = from; i < to; i++) {
+      const v = x[i];
+      // K-weighting (two biquads, direct form I)
+      let y1 = s1.b0 * v + s1.b1 * kz[0] + s1.b2 * kz[1] - s1.a1 * kz[2] - s1.a2 * kz[3];
+      kz[1] = kz[0]; kz[0] = v; kz[3] = kz[2]; kz[2] = y1;
+      let y2 = s2.b0 * y1 + s2.b1 * kz[4] + s2.b2 * kz[5] - s2.a1 * kz[6] - s2.a2 * kz[7];
+      kz[5] = kz[4]; kz[4] = y1; kz[7] = kz[6]; kz[6] = y2;
+      kSum += y2 * y2;
+      // A-weighting
+      let a = v * ag;
+      for (let s = 0; s < 6; s++) {
+        const c = secs[s], o = a;
+        a = c.b0 * o + c.b1 * az[2 * s] - c.a1 * az[2 * s + 1];
+        az[2 * s] = o; az[2 * s + 1] = a;
+      }
+      aSum += a * a;
+      sq += v * v;
+      const av = v < 0 ? -v : v;
+      if (av > pk) pk = av;
+      // clip = 3+ consecutive samples at full scale
+      if (av >= 0.999) { run++; if (run === 3) clip++; } else run = 0;
+      // true peak: 4x polyphase interpolation over a doubled ring buffer
+      h[hi] = v; h[hi + TPN] = v;
+      hi = (hi + 1) % TPN;
+      for (let p = 0; p < 4; p++) {
+        const c = TP[p];
+        let acc = 0;
+        for (let k = 0; k < TPN; k++) acc += c[k] * h[hi + TPN - 1 - k];
+        if (acc < 0) acc = -acc;
+        if (acc > tp) tp = acc;
+      }
+    }
+    if (pk > tp) tp = pk;
+    st.kSum = kSum; st.sq = sq; st.aSum = aSum; st.pk = pk; st.tp = tp; st.run = run; st.clip = clip; st.hi = hi;
+  }
+  process(inputs) {
+    const inp = inputs[0];
+    if (!inp || inp.length === 0) return true;
+    const len = inp[0].length;
+    let off = 0;
+    while (off < len) {
+      const take = Math.min(len - off, this.blockLen - this.count);
+      for (let c = 0; c < this.ch.length; c++) {
+        const x = inp[Math.min(this.sel[c], inp.length - 1)];
+        this.runChannel(this.ch[c], x, off, off + take);
+      }
+      if (this.ch.length === 2) {
+        const L = inp[Math.min(this.sel[0], inp.length - 1)], R = inp[Math.min(this.sel[1], inp.length - 1)];
+        let xy = 0, xx = 0, yy = 0;
+        for (let i = off; i < off + take; i++) { xy += L[i] * R[i]; xx += L[i] * L[i]; yy += R[i] * R[i]; }
+        this.xy += xy; this.xx += xx; this.yy += yy;
+      }
+      this.count += take; off += take;
+      if (this.count >= this.blockLen) this.flush();
+    }
+    return true;
+  }
+  flush() {
+    const n = this.count;
+    const msg = { n, ms: [], sq: [], aw: [], pk: [], tp: [], clip: [], xy: this.xy, xx: this.xx, yy: this.yy };
+    for (const st of this.ch) {
+      msg.ms.push(st.kSum / n); msg.sq.push(st.sq / n); msg.aw.push(st.aSum / n);
+      msg.pk.push(st.pk); msg.tp.push(st.tp); msg.clip.push(st.clip);
+      st.kSum = 0; st.sq = 0; st.aSum = 0; st.pk = 0; st.tp = 0; st.clip = 0;
+    }
+    this.xy = 0; this.xx = 0; this.yy = 0; this.count = 0;
+    this.port.postMessage(msg);
+  }
+}
+registerProcessor('level-meter', LevelMeter);
+`;
+
+/* ------------------------------------------------------------------ *
+ *  Helpers                                                           *
+ * ------------------------------------------------------------------ */
+const ABS_GATE = -70;
+const lufs = p => p > 0 ? -0.691 + 10 * Math.log10(p) : -Infinity;
+const lufsToP = l => Math.pow(10, (l + 0.691) / 10);
+const dB = x => x > 0 ? 20 * Math.log10(x) : -Infinity;
+const dBp = p => p > 0 ? 10 * Math.log10(p) : -Infinity;
+const fmt = (x, d = 1) => Number.isFinite(x) ? x.toFixed(d).replace(/^-(0\.?0*)$/, '$1').replace('-', '−') : '—';
+const fmtS = (x, d = 1) => Number.isFinite(x) ? (x > 0 ? '+' : '') + fmt(x, d) : '—';
+const mean = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const el = (tag, attrs = {}, html = '') => { const e = document.createElement(tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (html) e.innerHTML = html; return e; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('alm.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('alm.' + k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } }
+};
+
+// Gated loudness (BS.1770) over a list of 400 ms block powers.
+function gatedLoudness(powers) {
+  const absP = lufsToP(ABS_GATE);
+  let s = 0, n = 0;
+  for (const p of powers) if (p > absP) { s += p; n++; }
+  if (!n) return -Infinity;
+  const rel = (s / n) * 0.1; // -10 LU
+  s = 0; n = 0;
+  for (const p of powers) if (p > absP && p > rel) { s += p; n++; }
+  return n ? lufs(s / n) : -Infinity;
+}
+
+const STREAM_FEED = 'the GL2200 output that feeds the camera (the aux, matrix or mono send you use for the stream)';
+
+const PROFILES = {
+  stream: {
+    title: 'Live Stream Output', sub: 'What viewers hear: the feed into the Web Presenter HD.',
+    peakScale: [-60, 0], zones: [-9, -1], lufsScale: [-40, 0], hint: 'Pick the Web Presenter (USB) or the interface input that taps the stream feed.'
+  },
+  house: {
+    title: 'House Mix (Main L/R)', sub: 'Electrical level of the GL2200 main mix (all the mics and instruments).',
+    peakScale: [-60, 0], zones: [-12, -3], lufsScale: [-40, 0], hint: 'Pick the interface input that taps the GL2200 main / record / matrix out.'
+  },
+  room: {
+    title: 'Room Loudness (SPL)', sub: 'How loud the congregation hears it, measured with a microphone in the room.',
+    hint: 'Pick a microphone in the room, such as a USB mic or the laptop mic.'
+  }
+};
+
+const ROOM_TARGETS = {
+  contemporary: { label: 'Contemporary worship (full band)', lo: 88, hi: 95 },
+  blended: { label: 'Blended service', lo: 82, hi: 90 },
+  traditional: { label: 'Traditional / spoken word', lo: 75, hi: 85 }
+};
+
+/* ------------------------------------------------------------------ *
+ *  Audio context + event log                                         *
+ * ------------------------------------------------------------------ */
+// One AudioContext per input sample rate, so inputs are measured at their native rate (no resampling).
+const contexts = new Map();
+async function getCtx(rate) {
+  const key = rate || 0;
+  let c = contexts.get(key);
+  if (!c) {
+    const ac = new (window.AudioContext || window.webkitAudioContext)(rate ? { latencyHint: 'playback', sampleRate: rate } : { latencyHint: 'playback' });
+    const sink = ac.createGain(); sink.gain.value = 0; sink.connect(ac.destination);
+    // A data: URL (not a blob: URL) so the worklet also loads when the page is opened as a local file.
+    const ready = ac.audioWorklet.addModule('data:application/javascript;charset=utf-8,' + encodeURIComponent(WORKLET_SRC));
+    c = { ac, sink, ready };
+    contexts.set(key, c);
+  }
+  await c.ready;
+  if (c.ac.state !== 'running') await c.ac.resume();
+  return c;
+}
+
+const logEntries = [];
+function logEvent(panel, lvl, msg) {
+  const t = new Date();
+  logEntries.push({ t, panel, lvl, msg });
+  if (logEntries.length > 1000) logEntries.shift();
+  const box = document.getElementById('log');
+  const row = el('div', { class: lvl }, esc(`${t.toLocaleTimeString()}  [${panel}]  ${msg}`));
+  box.prepend(row);
+  while (box.childElementCount > 300) box.lastChild.remove();
+}
+
+function showError(msg) {
+  const e = document.getElementById('errors');
+  e.textContent = msg;
+  if (msg) setTimeout(() => { if (e.textContent === msg) e.textContent = ''; }, 15000);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Meter panel                                                       *
+ * ------------------------------------------------------------------ */
+class Panel {
+  constructor(kind) {
+    this.kind = kind;
+    this.prof = PROFILES[kind];
+    this.name = this.prof.title.split(' (')[0];
+    this.settings = Object.assign({
+      deviceId: '', channels: '0,1', target: -14, tpLimit: -1, houseOffset: null, roomOffset: null, roomTarget: 'contemporary'
+    }, store.get('panel.' + kind, {}));
+    this.devChannels = 2;
+    this.running = false;
+    this.build();
+    this.resetStats();
+  }
+  save() { store.set('panel.' + this.kind, this.settings); }
+
+  build() {
+    const c = this.card = el('section', { class: 'card' });
+    c.innerHTML = `
+      <h2><span class="st"></span>${esc(this.prof.title)}</h2>
+      <div class="sub">${esc(this.prof.sub)}</div>
+      <div class="controls">
+        <select class="dev" title="${esc(this.prof.hint)}"><option value="">— enable inputs first —</option></select>
+        <select class="chan" title="Which input channel(s) to measure"></select>
+        <button class="go">Start</button>
+        <button class="rst" title="Clear this meter's measurements">Reset</button>
+      </div>
+      <details class="settings"><summary>Targets &amp; calibration</summary>${this.settingsHtml()}</details>
+      <div class="idle">${esc(this.prof.hint)}</div>
+      <div class="body" hidden>
+        <canvas class="meter"></canvas>
+        <div class="nums"></div>
+      </div>
+      <canvas class="hist" hidden></canvas>
+      <div class="advice"></div>`;
+    this.devSel = c.querySelector('.dev');
+    this.chanSel = c.querySelector('.chan');
+    this.goBtn = c.querySelector('.go');
+    this.meterCv = c.querySelector('canvas.meter');
+    this.histCv = c.querySelector('canvas.hist');
+    this.numsEl = c.querySelector('.nums');
+    this.adviceEl = c.querySelector('.advice');
+    this.idleEl = c.querySelector('.idle');
+    this.bodyEl = c.querySelector('.body');
+    this.fillChannelOptions();
+
+    this.devSel.addEventListener('change', () => {
+      this.settings.deviceId = this.devSel.value; this.save();
+      if (this.devSel.value) this.start(); else this.stop();
+    });
+    this.chanSel.addEventListener('change', () => {
+      this.settings.channels = this.chanSel.value; this.save();
+      if (this.node) { this.node.port.postMessage({ channels: this.channelIndices() }); this.resetStats(); }
+    });
+    this.goBtn.addEventListener('click', () => this.running ? this.stop() : this.start());
+    c.querySelector('.rst').addEventListener('click', () => { this.resetStats(); logEvent(this.name, 'info', 'Measurements reset'); });
+    this.bindSettings();
+    this.buildNums();
+  }
+
+  settingsHtml() {
+    if (this.kind === 'stream') return `
+      <div class="row">Loudness target
+        <select data-k="target">
+          <option value="-14">−14 LUFS: YouTube / Facebook / most streaming (recommended)</option>
+          <option value="-16">−16 LUFS: Apple / podcast style, a bit more headroom</option>
+          <option value="-18">−18 LUFS: conservative</option>
+          <option value="-23">−23 LUFS: EBU R128 broadcast</option>
+          <option value="-24">−24 LKFS: ATSC A/85 broadcast (US TV)</option>
+        </select></div>
+      <div class="row">True-peak ceiling
+        <select data-k="tpLimit"><option value="-1">−1 dBTP (recommended)</option><option value="-2">−2 dBTP (safer for AAC/low bitrates)</option></select></div>
+      <p>If this input is a single (mono) channel, it is measured as dual-mono, the same signal on both speakers.</p>`;
+    if (this.kind === 'house') return `
+      <p><b>Match this meter to your GL2200 meters</b> (optional, recommended). Play steady sound through the mix, such as pink noise, a tone, or someone talking steadily. Set the main mix so the GL2200 meters sit at a known point, for example 0. Then enter that reading and click Calibrate. After that, set your computer interface's input gain once and leave it alone.</p>
+      <div class="row">GL2200 meter reads <input type="number" step="1" value="0" class="calRef"> <button class="cal">Calibrate</button> <button class="uncal">Clear</button> <span class="calState"></span></div>`;
+    return `
+      <div class="row">Service style
+        <select data-k="roomTarget">${Object.entries(ROOM_TARGETS).map(([k, v]) => `<option value="${k}">${v.label} · ${v.lo}–${v.hi} dBA</option>`).join('')}</select></div>
+      <p><b>Calibrate before trusting the numbers.</b> Hold an SPL meter or phone SPL app (A-weighted, slow) next to this microphone during steady sound. Enter its reading and click Calibrate. Keep the mic gain the same afterwards.</p>
+      <div class="row">SPL meter reads <input type="number" step="0.5" value="85" class="calRef"> dBA <button class="cal">Calibrate</button> <button class="uncal">Clear</button> <span class="calState"></span></div>`;
+  }
+
+  bindSettings() {
+    this.card.querySelectorAll('[data-k]').forEach(s => {
+      const k = s.dataset.k;
+      s.value = String(this.settings[k]);
+      s.addEventListener('change', () => {
+        this.settings[k] = isNaN(+s.value) ? s.value : +s.value; this.save();
+        this.buildNums(); this.drawHist();
+      });
+    });
+    const cal = this.card.querySelector('.cal');
+    if (!cal) return;
+    const ref = this.card.querySelector('.calRef');
+    const key = this.kind === 'house' ? 'houseOffset' : 'roomOffset';
+    cal.addEventListener('click', () => {
+      // Use the last 5 s of steady signal: RMS for the house mix, A-weighted level for the room.
+      const w = this.window(5);
+      const p = mean(w.map(e => this.kind === 'house' ? e.sqAvg : e.awAvg));
+      if (!this.running || w.length < 20 || !(p > 1e-9)) { showError('Calibration needs about 5 seconds of steady signal on this meter first.'); return; }
+      const r = parseFloat(ref.value);
+      if (!Number.isFinite(r)) return;
+      // house: mixer reading = dBFS - offset;  room: dBA = dBFS(A) + offset
+      this.settings[key] = this.kind === 'house' ? dBp(p) - r : r - dBp(p);
+      this.save(); this.showCal(); this.buildNums(); this.drawHist();
+      logEvent(this.name, 'ok', `Calibrated: ${this.kind === 'house' ? 'GL2200 meter ' + fmtS(r, 0) : fmt(r) + ' dBA'}`);
+    });
+    this.card.querySelector('.uncal').addEventListener('click', () => { this.settings[key] = null; this.save(); this.showCal(); this.buildNums(); this.drawHist(); });
+    this.showCal();
+  }
+  showCal() {
+    const s = this.card.querySelector('.calState');
+    if (!s) return;
+    const off = this.kind === 'house' ? this.settings.houseOffset : this.settings.roomOffset;
+    s.textContent = off == null ? 'Not calibrated' : 'Calibrated ✓';
+    s.style.color = off == null ? 'var(--warn)' : 'var(--ok)';
+  }
+
+  buildNums() {
+    const defs = {
+      stream: [['st', 'Short-term loudness (3 s)', true], ['int', 'Integrated (since reset)'], ['mom', 'Momentary'],
+        ['tp', 'True peak (last 10 s)'], ['tpmax', 'True peak max'], ['lra', 'Loudness range'], ['pk', 'Peak L / R'],
+        ['bal', 'Balance L−R'], ['corr', 'Stereo correlation'], ['clips', 'Clips']],
+      house: [['mix', this.settings.houseOffset == null ? 'Short-term loudness (3 s)' : '≈ GL2200 meter reading', true],
+        ['st2', 'Short-term loudness'], ['int', 'Integrated (since reset)'], ['rms', 'RMS L / R (dBFS)'], ['pk', 'Peak L / R (dBFS)'],
+        ['pkmax', 'Peak max (dBFS)'], ['lra', 'Loudness range'], ['clips', 'Interface clips']],
+      room: [['laf', this.settings.roomOffset == null ? 'Level, uncalibrated (dB A, rel.)' : 'Sound level now (dBA, fast)', true],
+        ['leq1', 'Average, last 1 min'], ['leq', 'Average since reset'], ['lmax', 'Max (fast)'], ['tgt', 'Target range']]
+    }[this.kind];
+    this.numsEl.innerHTML = '';
+    this.nums = {};
+    for (const [k, label, big] of defs) {
+      const d = el('div', { class: 'num' + (big ? ' big' : '') }, `<div class="k">${esc(label)}</div><div class="v">—</div>`);
+      this.numsEl.append(d);
+      this.nums[k] = d;
+    }
+  }
+  setNum(k, html, lvl) {
+    const d = this.nums[k];
+    if (!d) return;
+    d.querySelector('.v').innerHTML = html;
+    d.classList.remove('ok', 'warn', 'bad');
+    if (lvl) d.classList.add(lvl);
+  }
+
+  fillChannelOptions() {
+    const n = Math.max(1, this.devChannels);
+    const opts = [];
+    for (let i = 0; i + 1 < n; i += 2) opts.push([`${i},${i + 1}`, `Ch ${i + 1}+${i + 2} (stereo)`]);
+    for (let i = 0; i < n; i++) opts.push([`${i}`, `Ch ${i + 1} only (mono)`]);
+    this.chanSel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+    this.chanSel.value = opts.some(o => o[0] === this.settings.channels) ? this.settings.channels : opts[0][0];
+  }
+  channelIndices() { return this.chanSel.value.split(',').map(Number); }
+
+  setDevices(list) {
+    const cur = this.settings.deviceId;
+    this.devSel.innerHTML = `<option value="">— not used —</option>` +
+      list.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Input ' + (i + 1))}</option>`).join('');
+    if (cur && list.some(d => d.deviceId === cur)) this.devSel.value = cur;
+  }
+
+  async start() {
+    this.stop(true);
+    const devId = this.devSel.value;
+    if (!devId) { showError(`Pick an input for “${this.prof.title}” first.`); return; }
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: {
+        deviceId: { exact: devId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 8 }
+      } });
+      const track = this.stream.getAudioTracks()[0];
+      const ts = track.getSettings();
+      this.devChannels = ts.channelCount || 2;
+      let c;
+      try { c = await getCtx(ts.sampleRate); } catch (e) { c = await getCtx(); }
+      const ac = c.ac;
+      this.fillChannelOptions();
+      track.addEventListener('ended', () => { logEvent(this.name, 'bad', 'Input device disconnected'); this.stop(); });
+      this.src = ac.createMediaStreamSource(this.stream);
+      this.node = new AudioWorkletNode(ac, 'level-meter', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+        channelCount: Math.max(1, this.devChannels), channelCountMode: 'explicit', channelInterpretation: 'discrete',
+        processorOptions: { channels: this.channelIndices() }
+      });
+      this.node.port.onmessage = e => this.onBlock(e.data);
+      this.src.connect(this.node);
+      this.node.connect(c.sink);
+      this.running = true;
+      this.resetStats();
+      this.card.classList.add('running');
+      this.goBtn.textContent = 'Stop'; this.goBtn.classList.add('stop');
+      this.idleEl.hidden = true; this.bodyEl.hidden = false; this.histCv.hidden = false;
+      this.resize();
+      logEvent(this.name, 'ok', `Started: ${this.devSel.selectedOptions[0].textContent} (${this.devChannels} ch @ ${ac.sampleRate} Hz)`);
+      requestWakeLock();
+    } catch (e) {
+      showError(`Could not open input for ${this.prof.title}: ${e.message || e.name}`);
+      this.stop();
+    }
+  }
+  stop(quiet) {
+    if (this.node) { this.node.port.onmessage = null; this.node.disconnect(); this.node = null; }
+    if (this.src) { this.src.disconnect(); this.src = null; }
+    if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; }
+    if (this.running && !quiet) logEvent(this.name, 'info', 'Stopped');
+    this.running = false;
+    this.card.classList.remove('running');
+    this.goBtn.textContent = 'Start'; this.goBtn.classList.remove('stop');
+    if (!quiet) { this.idleEl.hidden = false; this.bodyEl.hidden = true; this.histCv.hidden = true; this.adviceEl.innerHTML = ''; }
+  }
+
+  resetStats() {
+    this.blocks = 0;
+    this.sub = [];          // last 30 x 100 ms K-weighted powers
+    this.gate = [];         // all 400 ms block powers since reset (integrated)
+    this.stHist = new Uint32Array(900); // short-term loudness histogram for LRA, -70..+20 LUFS in 0.1 steps
+    this.stPowSum = 0; this.stCount = 0;
+    this.recent = [];       // last 60 s of per-block summaries
+    this.hist = [];         // last 5 min for the graph
+    this.integrated = -Infinity; this.lra = NaN;
+    this.tpMax = -Infinity; this.pkMax = -Infinity; this.clips = 0;
+    this.dispPk = [-Infinity, -Infinity]; this.holdPk = [-Infinity, -Infinity]; this.holdT = [0, 0];
+    this.laf = -Infinity; this.awSum = 0; this.awN = 0; this.lafMax = -Infinity;
+    this.silentSince = null; this.lastEv = {};
+    this.lastAdvice = 0;
+  }
+  window(sec) { return this.recent.slice(-Math.round(sec * 10)); }
+  hasSignal() { return this.running && this.window(5).some(e => e.mom > -50); }
+
+  rateLimited(key, ms) {
+    const now = performance.now();
+    if (this.lastEv[key] && now - this.lastEv[key] < ms) return true;
+    this.lastEv[key] = now; return false;
+  }
+
+  onBlock(d) {
+    const nc = d.ms.length;
+    const w = nc === 1 ? 2 : 1; // mono measured as dual-mono
+    const kp = d.ms.reduce((s, v) => s + w * v, 0);
+    this.sub.push(kp); if (this.sub.length > 30) this.sub.shift();
+    this.blocks++;
+    const momP = this.sub.length >= 4 ? mean(this.sub.slice(-4)) : null;
+    const stP = this.sub.length >= 30 ? mean(this.sub) : null;
+    const mom = momP == null ? -Infinity : lufs(momP);
+    const st = stP == null ? -Infinity : lufs(stP);
+    if (momP != null) this.gate.push(momP);
+    if (stP != null && st > ABS_GATE) {
+      this.stHist[clamp(Math.floor((st + 70) * 10), 0, 899)]++;
+      this.stPowSum += stP; this.stCount++;
+    }
+    const pk = d.pk.map(dB), tp = d.tp.map(dB);
+    const tpB = Math.max(...tp), pkB = Math.max(...pk);
+    this.tpMax = Math.max(this.tpMax, tpB);
+    this.pkMax = Math.max(this.pkMax, pkB);
+    const clips = d.clip.reduce((s, v) => s + v, 0);
+    this.clips += clips;
+    const sqAvg = mean(d.sq), awAvg = mean(d.aw);
+    // Room: fast (125 ms) exponential time weighting
+    const a = 1 - Math.exp(-0.1 / 0.125);
+    this.lafP = this.lafP == null ? awAvg : this.lafP + a * (awAvg - this.lafP);
+    this.awSum += awAvg; this.awN++;
+    const ent = { mom, st, momP, tp: tpB, pk, sq: d.sq, sqAvg, awAvg, lafP: this.lafP, clip: clips, xy: d.xy, xx: d.xx, yy: d.yy, nc };
+    this.recent.push(ent); if (this.recent.length > 600) this.recent.shift();
+    this.hist.push(this.kind === 'room' ? dBp(this.lafP) : st); if (this.hist.length > 3000) this.hist.shift();
+    for (let i = 0; i < 2; i++) {
+      const v = pk[Math.min(i, nc - 1)];
+      if (v >= this.holdPk[i] || performance.now() - this.holdT[i] > 2000) { this.holdPk[i] = v; this.holdT[i] = performance.now(); }
+      if (v > this.dispPk[i]) this.dispPk[i] = v;
+    }
+    if (this.blocks > 4 && this.kind === 'room') {
+      const lv = dBp(this.lafP);
+      if (lv > this.lafMax) this.lafMax = lv;
+    }
+    this.events(ent);
+    if (this.blocks % 5 === 0) this.computeSlow();
+    this.updateNums(ent);
+    const now = performance.now();
+    if (now - this.lastAdvice > 1000) { this.lastAdvice = now; this.renderAdvice(); updateBanner(); }
+    if (this.blocks % 3 === 0) this.drawHist();
+  }
+
+  computeSlow() {
+    this.integrated = gatedLoudness(this.gate);
+    if (this.stCount > 0 && this.blocks > 600) {
+      const thr = lufs(this.stPowSum / this.stCount) - 20;
+      const i0 = clamp(Math.ceil((thr + 70) * 10), 0, 899);
+      let tot = 0;
+      for (let i = i0; i < 900; i++) tot += this.stHist[i];
+      if (tot) {
+        const pct = q => { let c = 0; for (let i = i0; i < 900; i++) { c += this.stHist[i]; if (c >= q * tot) return i / 10 - 70; } return 20; };
+        this.lra = pct(0.95) - pct(0.10);
+      }
+    } else this.lra = NaN;
+  }
+
+  events(e) {
+    if (e.clip && !this.rateLimited('clip', 3000)) {
+      logEvent(this.name, 'bad', this.kind === 'house' ? 'Interface input clipped (only affects this meter, not the room)' : `Clipping (${e.clip} in 100 ms)`);
+    }
+    if (this.kind === 'stream') {
+      if (e.tp > this.settings.tpLimit && !e.clip && !this.rateLimited('tp', 5000)) logEvent(this.name, 'warn', `True peak ${fmt(e.tp)} dBTP over ${this.settings.tpLimit} dBTP ceiling`);
+      const silent = e.mom < -60;
+      if (silent && this.blocks > 10) {
+        if (this.silentSince == null) this.silentSince = performance.now();
+        else if (performance.now() - this.silentSince > 5000 && !this.silenceLogged) { this.silenceLogged = true; logEvent(this.name, 'bad', 'Stream audio went silent'); }
+      } else if (!silent) {
+        if (this.silenceLogged) logEvent(this.name, 'ok', `Stream audio back after ${Math.round((performance.now() - this.silentSince) / 1000)} s`);
+        this.silentSince = null; this.silenceLogged = false;
+      }
+    }
+    if (this.kind === 'room' && this.settings.roomOffset != null) {
+      const lv = dBp(e.lafP) + this.settings.roomOffset;
+      if (lv > 100 && !this.rateLimited('loud', 10000)) logEvent(this.name, 'warn', `Room hit ${fmt(lv)} dBA`);
+    }
+  }
+
+  updateNums(e) {
+    const tl = (v, good, warnBand) => !Number.isFinite(v) ? '' : Math.abs(v - good) <= 1 ? 'ok' : Math.abs(v - good) <= warnBand ? 'warn' : 'bad';
+    const peakLvl = (v, lim) => v > -0.1 ? 'bad' : v > lim ? 'warn' : '';
+    const pkLR = e.pk.length === 2 ? `${fmt(e.pk[0])} / ${fmt(e.pk[1])}` : fmt(e.pk[0]);
+    if (this.kind === 'stream') {
+      const T = this.settings.target, lim = this.settings.tpLimit;
+      this.setNum('st', `${fmt(e.st)} <small>LUFS · target ${T}</small>`, tl(e.st, T, 3));
+      this.setNum('int', `${fmt(this.integrated)} <small>LUFS</small>`, tl(this.integrated, T, 2));
+      this.setNum('mom', `${fmt(e.mom)} <small>LUFS</small>`);
+      const tp10 = Math.max(...this.window(10).map(x => x.tp));
+      this.setNum('tp', `${fmt(tp10)} <small>dBTP</small>`, peakLvl(tp10, lim) || 'ok');
+      this.setNum('tpmax', `${fmt(this.tpMax)} <small>dBTP</small>`, peakLvl(this.tpMax, lim));
+      this.setNum('lra', Number.isFinite(this.lra) ? `${fmt(this.lra)} <small>LU</small>` : '<small>after 1 min</small>', this.lra > 15 ? 'warn' : '');
+      this.setNum('pk', `${pkLR} <small>dBFS</small>`);
+      this.setBalance();
+      this.setNum('clips', String(this.clips), this.clips ? 'bad' : '');
+    } else if (this.kind === 'house') {
+      const off = this.settings.houseOffset;
+      if (off == null) this.setNum('mix', `${fmt(e.st)} <small>LUFS</small>`);
+      else {
+        const m = dBp(mean(this.window(0.3).map(x => x.sqAvg))) - off;
+        this.setNum('mix', `${fmtS(m)} <small>on the GL2200 meters (avg)</small>`, m > 6 ? 'bad' : m > 3 ? 'warn' : m < -12 ? 'warn' : 'ok');
+      }
+      this.setNum('st2', `${fmt(e.st)} <small>LUFS</small>`);
+      this.setNum('int', `${fmt(this.integrated)} <small>LUFS</small>`);
+      const rms = e.sq.map(dBp);
+      this.setNum('rms', rms.length === 2 ? `${fmt(rms[0])} / ${fmt(rms[1])}` : fmt(rms[0]));
+      this.setNum('pk', pkLR, peakLvl(Math.max(...e.pk), -3));
+      this.setNum('pkmax', fmt(this.pkMax), peakLvl(this.pkMax, -3));
+      this.setNum('lra', Number.isFinite(this.lra) ? `${fmt(this.lra)} <small>LU</small>` : '<small>after 1 min</small>');
+      this.setNum('clips', String(this.clips), this.clips ? 'bad' : '');
+    } else {
+      const off = this.settings.roomOffset, cal = off != null, o = cal ? off : 0, u = cal ? 'dBA' : 'dB rel.';
+      const t = ROOM_TARGETS[this.settings.roomTarget] || ROOM_TARGETS.contemporary;
+      const laf = dBp(e.lafP) + o;
+      const leq1 = dBp(mean(this.window(60).map(x => x.awAvg))) + o;
+      const lvl = v => !cal ? '' : v > t.hi + 3 ? 'bad' : v > t.hi ? 'warn' : v < t.lo - 3 ? 'warn' : 'ok';
+      this.setNum('laf', `${fmt(laf)} <small>${u}</small>`, lvl(laf));
+      this.setNum('leq1', `${fmt(leq1)} <small>${u}</small>`, lvl(leq1));
+      this.setNum('leq', `${fmt(dBp(this.awSum / this.awN) + o)} <small>${u}</small>`);
+      this.setNum('lmax', `${fmt(this.lafMax + o)} <small>${u}</small>`, cal && this.lafMax + o > 100 ? 'warn' : '');
+      this.setNum('tgt', `${t.lo}–${t.hi} <small>dBA</small>`);
+    }
+  }
+  setBalance() {
+    const w = this.window(10);
+    if (!w.length || w[0].nc !== 2) { this.setNum('bal', '<small>mono</small>'); this.setNum('corr', '<small>mono</small>'); return; }
+    const L = mean(w.map(x => x.sq[0])), R = mean(w.map(x => x.sq[1]));
+    const bal = dBp(L) - dBp(R);
+    this.setNum('bal', Number.isFinite(bal) ? `${fmtS(bal)} <small>dB</small>` : (L > R ? '<small>left only</small>' : R > L ? '<small>right only</small>' : '—'),
+      !Number.isFinite(bal) && (L > 1e-7 || R > 1e-7) ? 'bad' : Math.abs(bal) > 3 ? 'warn' : '');
+    const xy = w.reduce((s, x) => s + x.xy, 0), xx = w.reduce((s, x) => s + x.xx, 0), yy = w.reduce((s, x) => s + x.yy, 0);
+    const corr = xx > 0 && yy > 0 ? xy / Math.sqrt(xx * yy) : NaN;
+    this.setNum('corr', Number.isFinite(corr) ? fmtS(corr, 2) : '—', corr < -0.3 ? 'warn' : '');
+  }
+
+  /* ---------------- suggestions ---------------- */
+  advice() {
+    if (!this.running) return [];
+    if (this.blocks < 30) return [{ lvl: 'info', title: 'Listening…', body: 'Gathering a few seconds of audio.' }];
+    return this.kind === 'stream' ? this.streamAdvice() : this.kind === 'house' ? this.houseAdvice() : this.roomAdvice();
+  }
+
+  streamAdvice() {
+    const A = [], T = this.settings.target, lim = this.settings.tpLimit;
+    const r5 = this.window(5), r10 = this.window(10), r30 = this.window(30);
+    if (Math.max(...r5.map(e => e.mom)) < -60) {
+      const houseLive = panels.house.hasSignal();
+      A.push({ lvl: 'bad', title: houseLive ? 'The house has sound, but the stream is silent' : 'No audio on the stream feed',
+        body: `Check, in order: 1) the send to the camera on the GL2200 is unmuted and turned up. 2) The 3.5 mm cable is fully seated at both ends. 3) The camera's audio input is set to external, not the built-in mic, and its level isn't at zero. 4) The Web Presenter HD is set to use the camera's embedded audio. 5) This meter's input is still connected.` });
+      return A;
+    }
+    const clips10 = r10.reduce((s, e) => s + e.clip, 0);
+    if (clips10) A.push({ lvl: 'bad', title: `Clipping: ${clips10} in the last 10 s`,
+      body: `The stream audio is distorting. The most common cause is the GL2200's line-level output overloading the camera's 3.5 mm input, which usually expects mic level. Set the camera input to LINE if it has that option, or use an inline attenuator cable (−20 to −40 dB). Turn off the camera's auto level (ALC/AGC). Then lower ${STREAM_FEED} until this stops.` });
+    const tp10 = Math.max(...r10.map(e => e.tp)), tp30 = Math.max(...r30.map(e => e.tp));
+    if (tp10 > lim && !clips10) A.push({ lvl: tp10 > -0.1 ? 'bad' : 'warn', title: `Peaks too hot: ${fmt(tp10)} dBTP`,
+      body: `Keep true peaks below ${lim} dBTP. Lower the stream feed by about ${fmt(tp10 - lim + 0.5)} dB, or put a compressor/limiter on ${STREAM_FEED}. YouTube and Facebook re-encode your audio, and overs turn into crackle.` });
+    if (r30[0] && r30[0].nc === 2) {
+      const L = mean(r30.map(e => e.sq[0])), R = mean(r30.map(e => e.sq[1]));
+      const lo = Math.min(L, R), hi = Math.max(L, R), side = L < R ? 'left' : 'right';
+      if (hi > 1e-5 && lo < 1e-7) A.push({ lvl: 'bad', title: `Only one side has audio (the ${side} channel is silent)`,
+        body: 'Viewers on one speaker or a phone may hear little or nothing. This usually means a mono (TS) plug or a mono output wired into a stereo 3.5 mm jack. Use a cable that sends the signal to both tip and ring, or feed L and R from the mixer. If the camera can copy channel 1 to both channels, turn that on.' });
+      else if (Math.abs(dBp(L) - dBp(R)) > 3 && hi > 1e-6) A.push({ lvl: 'warn', title: `Left/right imbalance: ${fmt(Math.abs(dBp(L) - dBp(R)))} dB louder on the ${L > R ? 'left' : 'right'}`,
+        body: 'Check the pan and balance of the stream send, and that both cable channels are connected.' });
+      const xy = r10.reduce((s, e) => s + e.xy, 0), xx = r10.reduce((s, e) => s + e.xx, 0), yy = r10.reduce((s, e) => s + e.yy, 0);
+      const corr = xx > 0 && yy > 0 ? xy / Math.sqrt(xx * yy) : 1;
+      if (corr < -0.3) A.push({ lvl: 'warn', title: `Left and right are out of phase (correlation ${fmtS(corr, 2)})`,
+        body: 'The stream will sound hollow, and voices can disappear on phones and mono speakers. Check for a miswired cable or a polarity (Ø) switch on one side.' });
+    }
+    const L30 = gatedLoudness(r30.filter(e => e.momP != null).map(e => e.momP));
+    if (Number.isFinite(L30)) {
+      const diff = L30 - T;
+      if (Math.abs(diff) <= 1) A.push({ lvl: 'ok', title: `Loudness on target (${fmt(L30)} LUFS, last 30 s)`, body: `Target is ${T} LUFS.` });
+      else if (diff < 0) {
+        const room = lim - tp30;
+        let body = `Raise ${STREAM_FEED} by about ${fmt(-diff)} dB. Make the change at the mixer if you can. If you raise the camera's audio level instead, set it to manual first.`;
+        if (room < -diff) body += ` Peaks only have ${fmt(Math.max(0, room))} dB of headroom, so raising the level all the way would push them past ${lim} dBTP. Add a compressor or limiter (about ${fmt(-diff - Math.max(0, room), 0)} dB of gain reduction on loud parts) to the stream feed first, then raise it.`;
+        A.push({ lvl: -diff > 3 ? 'bad' : 'warn', title: `Stream too quiet: ${fmt(L30)} LUFS (${fmt(-diff)} dB under target)`, body });
+      } else {
+        A.push({ lvl: diff > 3 ? 'bad' : 'warn', title: `Stream too loud: ${fmt(L30)} LUFS (${fmt(diff)} dB over target)`,
+          body: `Lower ${STREAM_FEED} by about ${fmt(diff)} dB. Platforms will turn you down anyway, but you lose peak headroom and any distortion stays in the stream.` });
+      }
+    }
+    if (this.lra > 15) A.push({ lvl: 'warn', title: `Big loudness swings (LRA ${fmt(this.lra)} LU)`,
+      body: 'Songs and speaking are at very different levels, so viewers keep adjusting their volume. Ride the stream send, or add gentle compression to it. The pastor\'s mic usually needs 3–6 dB more in the stream mix than in the room.' });
+    if (!A.some(a => a.lvl === 'bad' || a.lvl === 'warn') && !A.some(a => a.lvl === 'ok'))
+      A.push({ lvl: 'ok', title: 'Stream levels look good', body: '' });
+    return A;
+  }
+
+  houseAdvice() {
+    const A = [], off = this.settings.houseOffset;
+    const r5 = this.window(5), r10 = this.window(10), r30 = this.window(30);
+    const pk10 = Math.max(...r10.map(e => Math.max(...e.pk)));
+    if (Math.max(...r5.map(e => e.mom)) < -60) {
+      A.push({ lvl: 'info', title: 'No signal on the house mix tap', body: 'This is normal between segments. If music or speech is happening, check the cable from the GL2200 to this computer\'s interface.' });
+      return A;
+    }
+    if (r10.some(e => e.clip) || pk10 > -1) A.push({ lvl: 'bad', title: 'The computer interface input is clipping',
+      body: 'Turn down the input gain on the computer\'s audio interface. This only affects this meter, not the house sound. Aim for normal service peaks around −12 to −6 dBFS here, then recalibrate.' });
+    if (off == null) {
+      A.push({ lvl: 'info', title: 'Calibrate to read in GL2200 meter units',
+        body: 'Open “Targets & calibration” to match this meter to the mixer\'s meters. Until then it shows dBFS and LUFS at the interface.' });
+      if (pk10 < -30) A.push({ lvl: 'warn', title: 'Very low level at the interface', body: 'Raise the interface input gain so normal service peaks reach around −12 dBFS.' });
+    } else {
+      const m30 = dBp(mean(r30.map(e => e.sqAvg))) - off;
+      const mpk = pk10 - off;
+      if (m30 > 6 || mpk > 14) A.push({ lvl: 'bad', title: `Mix bus running hot (avg ${fmtS(m30)}, peaks ${fmtS(mpk)} on GL2200 meters)`,
+        body: 'You are running out of headroom on the main mix. Lower the master faders, or lower the channel gains on any channel lighting its peak LED. Then raise the amplifier or speaker level if the room needs more volume.' });
+      else if (m30 > 3) A.push({ lvl: 'warn', title: `Mix bus a bit hot (avg ${fmtS(m30)} on GL2200 meters)`,
+        body: 'Fine for short loud moments. Aim for the meters averaging around 0 so peaks don\'t reach the red.' });
+      else if (m30 < -12) A.push({ lvl: 'warn', title: `Mix bus low (avg ${fmtS(m30)} on GL2200 meters)`,
+        body: 'This adds hiss to the house and to any feed taken from the mix. Set the channel gain (trim) so each source peaks around 0 on its PFL, keep the faders near their 0 (U) mark, and use the amplifiers for overall room volume.' });
+      else A.push({ lvl: 'ok', title: `Mix bus gain structure looks healthy (avg ${fmtS(m30)})`, body: '' });
+    }
+    if (this.lra > 18) A.push({ lvl: 'info', title: `Wide dynamics (LRA ${fmt(this.lra)} LU)`, body: 'Speech and music are far apart in level. If people strain to hear speaking parts, bring the spoken-word mics up or compress them a little.' });
+    if (panels.stream.hasSignal()) A.push({ lvl: 'info', title: 'Stream tip', body: 'Loud sources in the room, such as drums, guitar amps and choirs, are often low in the mix because the room already hears them. If the stream feed comes from this mix, it may need more of those sources. Check the Live Stream meter after any big change to the main faders.' });
+    return A;
+  }
+
+  roomAdvice() {
+    const A = [], off = this.settings.roomOffset;
+    const t = ROOM_TARGETS[this.settings.roomTarget] || ROOM_TARGETS.contemporary;
+    if (off == null) {
+      A.push({ lvl: 'warn', title: 'Not calibrated, so readings are relative only', body: 'Open “Targets & calibration” and calibrate against an SPL meter or phone SPL app before relying on room levels.' });
+      return A;
+    }
+    if (this.window(5).some(e => e.clip)) A.push({ lvl: 'bad', title: 'The measurement mic input is clipping', body: 'Lower the mic or interface gain on this computer, then recalibrate.' });
+    const leq1 = dBp(mean(this.window(60).map(e => e.awAvg))) + off;
+    const leqAll = dBp(this.awSum / this.awN) + off, mins = this.awN / 600;
+    if (leq1 > t.hi) A.push({ lvl: leq1 > t.hi + 3 ? 'bad' : 'warn', title: `Room is loud: ${fmt(leq1)} dBA (last minute)`,
+      body: `Target for “${t.label}” is ${t.lo}–${t.hi} dBA. Bring the main L/R down about ${fmt(leq1 - t.hi)} dB. Stage volume (drums, amps, monitors) also counts; if the PA is already low, ask the band to turn down. If the stream feed is taken after the main fader, check the Live Stream meter after you change it.` });
+    else if (leq1 < t.lo - 3 && leq1 > 60) A.push({ lvl: 'warn', title: `Room is quiet: ${fmt(leq1)} dBA (last minute)`,
+      body: `Target for “${t.label}” is ${t.lo}–${t.hi} dBA. This is fine for quiet moments and prayer. For songs, bring the main L/R up about ${fmt(t.lo - leq1)} dB.` });
+    else if (leq1 >= t.lo - 3) A.push({ lvl: 'ok', title: `Room level in range (${fmt(leq1)} dBA, last minute)`, body: '' });
+    if (this.lafMax + off > 105) A.push({ lvl: 'warn', title: `Peak of ${fmt(this.lafMax + off)} dBA`, body: 'Very loud peaks are uncomfortable and fatiguing. Look for feedback, hard drum hits or a hot channel.' });
+    if (mins > 10 && leqAll > 94) A.push({ lvl: 'bad', title: `Service average ${fmt(leqAll)} dBA is above hearing-safety guidance`,
+      body: 'NIOSH guidance allows about 1 hour at 94 dBA. Lower the overall level for the rest of the service.' });
+    return A;
+  }
+
+  renderAdvice() {
+    const A = this.advice();
+    const order = { bad: 0, warn: 1, info: 3, ok: 2 };
+    A.sort((a, b) => order[a.lvl] - order[b.lvl]);
+    this.currentAdvice = A;
+    this.adviceEl.innerHTML = A.map(a => `<div class="adv ${a.lvl}"><b>${esc(a.title)}</b>${a.body ? `<span>${esc(a.body)}</span>` : ''}</div>`).join('');
+  }
+
+  /* ---------------- drawing ---------------- */
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    for (const cv of [this.meterCv, this.histCv]) {
+      const w = cv.clientWidth, h = cv.clientHeight;
+      if (w && h) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    }
+    this.drawHist();
+  }
+
+  drawMeter(dt) {
+    const cv = this.meterCv, g = cv.getContext('2d');
+    const dpr = window.devicePixelRatio || 1, W = cv.width / dpr, H = cv.height / dpr;
+    if (!W) return;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const top = 10, bot = H - 22, h = bot - top;
+    g.font = '10px system-ui, sans-serif'; g.textBaseline = 'middle';
+    const bar = (x, bw, scale, val, zones, colors, label) => {
+      const [mn, mx] = scale, y = v => top + (1 - (clamp(v, mn, mx) - mn) / (mx - mn)) * h;
+      g.fillStyle = '#161c24'; g.fillRect(x, top, bw, h);
+      if (Number.isFinite(val) && val > mn) {
+        let from = mn;
+        zones.concat([mx]).forEach((z, i) => {
+          const to = Math.min(z, val);
+          if (to > from) { g.fillStyle = colors[i]; g.fillRect(x, y(to), bw, y(from) - y(to)); }
+          from = Math.max(from, z);
+        });
+      }
+      g.fillStyle = '#8d99a6'; g.textAlign = 'center'; g.fillText(label, x + bw / 2, H - 10);
+      return y;
+    };
+    const ticks = (x, scale, step, align) => {
+      const [mn, mx] = scale;
+      g.fillStyle = '#6e7a87'; g.textAlign = align;
+      for (let v = mx; v >= mn; v -= step) g.fillText(String(v), x, top + (1 - (v - mn) / (mx - mn)) * h);
+    };
+    if (this.kind === 'room') {
+      const cal = this.settings.roomOffset != null, o = cal ? this.settings.roomOffset : 0;
+      const sc = cal ? [40, 110] : [-80, 0];
+      const t = ROOM_TARGETS[this.settings.roomTarget] || ROOM_TARGETS.contemporary;
+      ticks(26, sc, 10, 'right');
+      const bw = Math.min(60, W - 50), x = 36;
+      const lv = this.lafP == null ? -Infinity : dBp(this.lafP) + o;
+      const y = bar(x, bw, sc, lv, cal ? [t.lo, t.hi + 3, 100] : [-20], cal ? ['#2b6cb0', '#2ea043', '#d29922', '#f85149'] : ['#2b6cb0', '#d29922'], cal ? 'dBA' : 'rel.');
+      if (cal) { g.strokeStyle = '#2ea043'; g.lineWidth = 2; g.strokeRect(x - 3, y(t.hi), bw + 6, y(t.lo) - y(t.hi)); }
+      return;
+    }
+    const sc = this.prof.peakScale, z = this.prof.zones, cols = ['#2ea043', '#d29922', '#f85149'];
+    ticks(22, sc, 6, 'right');
+    const nc = this.recent.length ? this.recent[this.recent.length - 1].nc : 2;
+    const decay = 24 * dt; // dB/s fall-back
+    const bw = Math.max(12, Math.min(26, (W - 90) / 3));
+    let x = 28;
+    for (let i = 0; i < Math.max(1, nc); i++) {
+      this.dispPk[i] = Math.max(this.dispPk[i] - decay, -200);
+      const y = bar(x, bw, sc, this.dispPk[i], z, cols, nc === 1 ? 'M' : i ? 'R' : 'L');
+      if (Number.isFinite(this.holdPk[i])) { g.fillStyle = '#e6edf3'; g.fillRect(x, y(this.holdPk[i]) - 1, bw, 2); }
+      x += bw + 4;
+    }
+    // loudness bar (short-term with momentary tick)
+    x += 8;
+    const ls = this.prof.lufsScale, last = this.recent[this.recent.length - 1] || {};
+    const T = this.kind === 'stream' ? this.settings.target : null;
+    const y = bar(x, bw, ls, last.st, [ls[1]], ['#3b82f6'], 'LU');
+    if (T != null) { g.fillStyle = 'rgba(46,160,67,.35)'; g.fillRect(x - 3, y(T + 1), bw + 6, y(T - 1) - y(T + 1)); }
+    if (Number.isFinite(last.mom)) { g.fillStyle = '#9cc4ff'; g.fillRect(x - 3, y(last.mom) - 1, bw + 6, 2); }
+    ticks(x + bw + 4, ls, 10, 'left');
+  }
+
+  drawHist() {
+    const cv = this.histCv;
+    if (!cv || cv.hidden) return;
+    const g = cv.getContext('2d'), dpr = window.devicePixelRatio || 1, W = cv.width / dpr, H = cv.height / dpr;
+    if (!W) return;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    let sc, band = null, o = 0, unit;
+    if (this.kind === 'room') {
+      const cal = this.settings.roomOffset != null; o = cal ? this.settings.roomOffset : 0;
+      sc = cal ? [50, 110] : [-80, 0]; unit = cal ? 'dBA' : 'rel';
+      const t = ROOM_TARGETS[this.settings.roomTarget] || ROOM_TARGETS.contemporary;
+      if (cal) band = [t.lo, t.hi];
+    } else { sc = this.prof.lufsScale; unit = 'LUFS'; if (this.kind === 'stream') band = [this.settings.target - 1, this.settings.target + 1]; }
+    const L = 30, R = 6, T = 6, B = 16, w = W - L - R, h = H - T - B;
+    const y = v => T + (1 - (clamp(v, sc[0], sc[1]) - sc[0]) / (sc[1] - sc[0])) * h;
+    g.font = '10px system-ui, sans-serif'; g.textBaseline = 'middle'; g.textAlign = 'right';
+    for (let v = sc[0]; v <= sc[1]; v += 10) {
+      g.strokeStyle = '#1f2630'; g.beginPath(); g.moveTo(L, y(v)); g.lineTo(W - R, y(v)); g.stroke();
+      g.fillStyle = '#6e7a87'; g.fillText(String(v), L - 4, y(v));
+    }
+    if (band) { g.fillStyle = 'rgba(46,160,67,.18)'; g.fillRect(L, y(band[1]), w, y(band[0]) - y(band[1])); }
+    g.textAlign = 'left'; g.fillStyle = '#6e7a87';
+    g.fillText(`last 5 min · ${this.kind === 'room' ? 'sound level' : 'short-term'} (${unit})`, L + 4, H - 7);
+    const n = this.hist.length;
+    if (n < 2) return;
+    g.strokeStyle = '#58a6ff'; g.lineWidth = 1.5; g.beginPath();
+    let pen = false;
+    for (let i = 0; i < n; i++) {
+      const v = this.hist[i] + o;
+      const px = L + w - (n - 1 - i) / 3000 * w;
+      if (!Number.isFinite(v) || v < sc[0] - 20) { pen = false; continue; }
+      if (pen) g.lineTo(px, y(v)); else { g.moveTo(px, y(v)); pen = true; }
+    }
+    g.stroke();
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  App                                                               *
+ * ------------------------------------------------------------------ */
+const panels = { stream: new Panel('stream'), house: new Panel('house'), room: new Panel('room') };
+const panelList = Object.values(panels);
+panelList.forEach(p => document.getElementById('panels').append(p.card));
+
+function updateBanner() {
+  const b = document.getElementById('banner'), t = document.getElementById('bannerText');
+  const running = panelList.filter(p => p.running);
+  if (!running.length) return;
+  let worst = null;
+  const rank = { bad: 3, warn: 2, ok: 1, info: 0 };
+  for (const p of [panels.stream, panels.house, panels.room]) {
+    for (const a of p.currentAdvice || []) if (!worst || rank[a.lvl] > rank[worst.a.lvl]) worst = { p, a };
+  }
+  if (!worst || rank[worst.a.lvl] < 2) {
+    b.className = 'ok';
+    t.innerHTML = panels.stream.running ? `Stream OK <small>· ${fmt(panels.stream.recent.at(-1)?.st)} LUFS short-term · target ${panels.stream.settings.target}</small>` : 'All meters OK';
+  } else {
+    b.className = worst.a.lvl;
+    t.innerHTML = `${esc(worst.p.name)}: ${esc(worst.a.title)}`;
+  }
+}
+
+async function refreshDevices() {
+  const list = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+  panelList.forEach(p => p.setDevices(list));
+  return list;
+}
+
+let inputsEnabled = false;
+document.getElementById('enable').addEventListener('click', async () => {
+  if (!navigator.mediaDevices || !window.AudioWorkletNode) {
+    showError('This browser cannot read audio inputs here. Use a current Chrome or Edge, and open the file directly or from http://localhost.');
+    return;
+  }
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    s.getTracks().forEach(t => t.stop());
+  } catch (e) { showError('Microphone/input permission was denied. Allow it in the browser address bar, then try again.'); return; }
+  const list = await refreshDevices();
+  inputsEnabled = true;
+  document.getElementById('enable').textContent = 'Refresh inputs';
+  document.getElementById('bannerText').textContent = `${list.length} input(s) found. Choose an input for each meter you want to use.`;
+  for (const p of panelList) if (p.settings.deviceId && p.devSel.value === p.settings.deviceId && !p.running) await p.start();
+});
+if (navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', () => { if (inputsEnabled) refreshDevices(); });
+
+document.getElementById('resetAll').addEventListener('click', () => { panelList.forEach(p => p.resetStats()); logEvent('All', 'info', 'All measurements reset'); });
+document.getElementById('clearLog').addEventListener('click', () => { logEntries.length = 0; document.getElementById('log').innerHTML = ''; });
+document.getElementById('exportLog').addEventListener('click', () => {
+  const rows = [['time', 'meter', 'level', 'message']].concat(logEntries.map(e => [e.t.toISOString(), e.panel, e.lvl, e.msg]));
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const a = el('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `audio-log-${new Date().toISOString().slice(0, 10)}.csv` });
+  document.body.append(a); a.click(); a.remove();
+});
+
+let wakeLock = null;
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (e) { /* not supported */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && panelList.some(p => p.running)) requestWakeLock(); });
+
+window.addEventListener('resize', () => panelList.forEach(p => p.running && p.resize()));
+let lastFrame = performance.now();
+(function frame(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  for (const p of panelList) if (p.running) p.drawMeter(dt);
+  requestAnimationFrame(frame);
+})(performance.now());
+</script>
+</body>
+</html>
