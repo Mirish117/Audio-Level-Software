@@ -6,7 +6,7 @@ It is one file, `audio-level-meter.html`. Download it and double-click it to ope
 
 **Just want to look?** Click **Try demo** at the top to run all three meters on a simulated signal, with no audio hardware needed.
 
-**Download:** on GitHub, open `audio-level-meter.html`, click the **Download raw file** button (the down-arrow icon), and save it to the booth computer.
+**Open it:** with GitHub Pages turned on, go to https://mirish117.github.io/Audio-Level-Software/ in Chrome or Edge. Or download `audio-level-meter.html` and double-click it.
 
 ## What it shows
 
