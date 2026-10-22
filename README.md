@@ -4,6 +4,10 @@ An accurate audio level meter for a church or live-event booth running an **Alle
 
 It is one file, `audio-level-meter.html`. Download it and double-click it to open it in **Google Chrome or Microsoft Edge**. Nothing to install, and no internet needed once it's on the computer.
 
+**Just want to look?** Click **Try demo** at the top to run all three meters on a simulated signal, with no audio hardware needed.
+
+**Download:** on GitHub, open `audio-level-meter.html`, click the **Download raw file** button (the down-arrow icon), and save it to the booth computer.
+
 ## What it shows
 
 There are three meters. Use any combination of them.

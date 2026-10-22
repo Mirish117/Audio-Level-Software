@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Audio Level Meter</title>
+<title>Booth Level Meter</title>
 <style>
 :root {
   --bg: #0d1117; --card: #161b22; --card2: #1c2330; --line: #2b3440;
   --text: #e6edf3; --muted: #8d99a6; --accent: #58a6ff;
   --ok: #2ea043; --warn: #d29922; --bad: #f85149; --info: #58a6ff;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-  padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 5; }
+  padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
 header h1 { font-size: 18px; margin: 0 12px 0 0; font-weight: 650; }
 header .spacer { flex: 1; }
 button, select, input { font: inherit; color: var(--text); background: var(--card2);
@@ -84,11 +85,12 @@ canvas.hist { height: 120px; background: #0a0d12; border-radius: 6px; }
 <header>
   <h1>Audio Level Meter</h1>
   <button id="enable" class="primary">Enable audio inputs</button>
+  <button id="demoAll" title="See the meters work with a simulated signal">Try demo</button>
   <button id="resetAll" title="Clear all measurements and start fresh (e.g. at the start of a service)">Reset all</button>
   <span class="spacer"></span>
   <button id="exportLog">Export log (CSV)</button>
 </header>
-<div id="banner" class="idle"><span class="dot"></span><span id="bannerText">Click “Enable audio inputs”, then pick an input for each meter.</span></div>
+<div id="banner" class="idle"><span class="dot"></span><span id="bannerText">Click “Enable audio inputs”, then pick an input for each meter. Or click “Try demo” to see it working with a simulated signal.</span></div>
 <div id="errors"></div>
 <main id="panels"></main>
 <section id="logwrap">
@@ -302,6 +304,42 @@ const ROOM_TARGETS = {
 };
 
 /* ------------------------------------------------------------------ *
+ *  Demo signal: 10 s of speaking, then 14 s of a band, looped        *
+ * ------------------------------------------------------------------ */
+const DEMO_ID = '__demo__';
+const DEMO_ROOM_OFFSET = 118;
+function demoBuffer(ac, kind) {
+  const fs = ac.sampleRate, len = fs * 24, buf = ac.createBuffer(2, len, fs);
+  const L = buf.getChannelData(0), R = buf.getChannelData(1);
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5;
+  const gain = { stream: 0.45, house: 0.6, room: 0.6 }[kind];
+  const TAU = 2 * Math.PI;
+  for (let i = 0; i < len; i++) {
+    const t = i / fs;
+    let l, r;
+    if (t < 10) {
+      const syl = Math.pow(Math.max(0, Math.sin(TAU * 1.9 * t + 2 * Math.sin(t * 1.3))), 2) * (0.6 + 0.4 * Math.sin(t * 0.7));
+      const f0 = 130 + 15 * Math.sin(t * 2.1);
+      let v = 0;
+      for (let h = 1; h <= 8; h++) v += Math.sin(TAU * f0 * h * t) / h;
+      l = r = (v * 0.12 + rnd() * 0.02) * syl;
+    } else {
+      const beat = (t * 2) % 1;
+      const kick = Math.exp(-beat * 18) * Math.sin(TAU * (55 + 80 * Math.exp(-beat * 30)) * t) * 0.55;
+      let chord = 0;
+      for (const f of [196, 247, 294, 392]) chord += Math.sin(TAU * f * t) + 0.3 * Math.sin(2 * TAU * f * t);
+      chord *= 0.06;
+      const hat = (t * 4) % 1 < 0.03 ? rnd() * 0.35 : 0;
+      const crash = (t % 4) < 0.25 ? rnd() * 0.8 * (1 - (t % 4) / 0.25) : 0;
+      l = kick + chord * 1.1 + hat + crash; r = kick + chord * 0.9 + hat * 0.7 + crash;
+    }
+    L[i] = l * gain; R[i] = r * gain;
+  }
+  return buf;
+}
+
+/* ------------------------------------------------------------------ *
  *  Audio context + event log                                         *
  * ------------------------------------------------------------------ */
 // One AudioContext per input sample rate, so inputs are measured at their native rate (no resampling).
@@ -355,7 +393,7 @@ class Panel {
     this.build();
     this.resetStats();
   }
-  save() { store.set('panel.' + this.kind, this.settings); }
+  save() { store.set('panel.' + this.kind, this.demoCal ? Object.assign({}, this.settings, { roomOffset: null }) : this.settings); }
 
   build() {
     const c = this.card = el('section', { class: 'card' });
@@ -363,7 +401,7 @@ class Panel {
       <h2><span class="st"></span>${esc(this.prof.title)}</h2>
       <div class="sub">${esc(this.prof.sub)}</div>
       <div class="controls">
-        <select class="dev" title="${esc(this.prof.hint)}"><option value="">— enable inputs first —</option></select>
+        <select class="dev" title="${esc(this.prof.hint)}"><option value="">— enable inputs first —</option><option value="${DEMO_ID}">Demo signal (simulated)</option></select>
         <select class="chan" title="Which input channel(s) to measure"></select>
         <button class="go">Start</button>
         <button class="rst" title="Clear this meter's measurements">Reset</button>
@@ -388,7 +426,7 @@ class Panel {
     this.fillChannelOptions();
 
     this.devSel.addEventListener('change', () => {
-      this.settings.deviceId = this.devSel.value; this.save();
+      if (this.devSel.value !== DEMO_ID) { this.settings.deviceId = this.devSel.value; this.save(); }
       if (this.devSel.value) this.start(); else this.stop();
     });
     this.chanSel.addEventListener('change', () => {
@@ -499,9 +537,10 @@ class Panel {
 
   setDevices(list) {
     const cur = this.settings.deviceId;
-    this.devSel.innerHTML = `<option value="">— not used —</option>` +
+    this.devSel.innerHTML = `<option value="">— not used —</option><option value="${DEMO_ID}">Demo signal (simulated)</option>` +
       list.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Input ' + (i + 1))}</option>`).join('');
-    if (cur && list.some(d => d.deviceId === cur)) this.devSel.value = cur;
+    if (this.demo) this.devSel.value = DEMO_ID;
+    else if (cur && list.some(d => d.deviceId === cur)) this.devSel.value = cur;
   }
 
   async start() {
@@ -509,6 +548,7 @@ class Panel {
     const devId = this.devSel.value;
     if (!devId) { showError(`Pick an input for “${this.prof.title}” first.`); return; }
     try {
+      if (devId === DEMO_ID) return await this.startDemo();
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: {
         deviceId: { exact: devId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 8 }
       } });
@@ -521,30 +561,49 @@ class Panel {
       this.fillChannelOptions();
       track.addEventListener('ended', () => { logEvent(this.name, 'bad', 'Input device disconnected'); this.stop(); });
       this.src = ac.createMediaStreamSource(this.stream);
-      this.node = new AudioWorkletNode(ac, 'level-meter', {
-        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-        channelCount: Math.max(1, this.devChannels), channelCountMode: 'explicit', channelInterpretation: 'discrete',
-        processorOptions: { channels: this.channelIndices() }
-      });
-      this.node.port.onmessage = e => this.onBlock(e.data);
-      this.src.connect(this.node);
-      this.node.connect(c.sink);
-      this.running = true;
-      this.resetStats();
-      this.card.classList.add('running');
-      this.goBtn.textContent = 'Stop'; this.goBtn.classList.add('stop');
-      this.idleEl.hidden = true; this.bodyEl.hidden = false; this.histCv.hidden = false;
-      this.resize();
-      logEvent(this.name, 'ok', `Started: ${this.devSel.selectedOptions[0].textContent} (${this.devChannels} ch @ ${ac.sampleRate} Hz)`);
-      requestWakeLock();
+      this.attach(c, `${this.devSel.selectedOptions[0].textContent} (${this.devChannels} ch @ ${ac.sampleRate} Hz)`);
     } catch (e) {
       showError(`Could not open input for ${this.prof.title}: ${e.message || e.name}`);
       this.stop();
     }
   }
+  async startDemo() {
+    const c = await getCtx(48000);
+    this.devChannels = 2;
+    this.fillChannelOptions();
+    this.src = c.ac.createBufferSource();
+    this.src.buffer = demoBuffer(c.ac, this.kind);
+    this.src.loop = true;
+    this.src.start();
+    this.demo = true;
+    // The room meter needs a calibration to show dBA; borrow a demo one without saving it.
+    if (this.kind === 'room' && this.settings.roomOffset == null) { this.settings.roomOffset = DEMO_ROOM_OFFSET; this.demoCal = true; this.buildNums(); }
+    this.attach(c, 'Demo signal (simulated speaking, then a full band)');
+  }
+  attach(c, label) {
+    const ac = c.ac;
+    this.node = new AudioWorkletNode(ac, 'level-meter', {
+      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+      channelCount: Math.max(1, this.devChannels), channelCountMode: 'explicit', channelInterpretation: 'discrete',
+      processorOptions: { channels: this.channelIndices() }
+    });
+    this.node.port.onmessage = e => this.onBlock(e.data);
+    this.src.connect(this.node);
+    this.node.connect(c.sink);
+    this.running = true;
+    this.resetStats();
+    this.card.classList.add('running');
+    this.goBtn.textContent = 'Stop'; this.goBtn.classList.add('stop');
+    this.idleEl.hidden = true; this.bodyEl.hidden = false; this.histCv.hidden = false;
+    this.resize();
+    logEvent(this.name, 'ok', `Started: ${label}`);
+    requestWakeLock();
+  }
   stop(quiet) {
     if (this.node) { this.node.port.onmessage = null; this.node.disconnect(); this.node = null; }
-    if (this.src) { this.src.disconnect(); this.src = null; }
+    if (this.src) { if (this.src.stop) this.src.stop(); this.src.disconnect(); this.src = null; }
+    if (this.demoCal) { this.settings.roomOffset = null; this.demoCal = false; this.buildNums(); }
+    this.demo = false;
     if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; }
     if (this.running && !quiet) logEvent(this.name, 'info', 'Stopped');
     this.running = false;
@@ -976,7 +1035,7 @@ document.getElementById('enable').addEventListener('click', async () => {
   try {
     const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     s.getTracks().forEach(t => t.stop());
-  } catch (e) { showError('Microphone/input permission was denied. Allow it in the browser address bar, then try again.'); return; }
+  } catch (e) { showError('Could not access audio inputs. If you are viewing this as a web link, live inputs are not available there: download audio-level-meter.html and open it in Chrome or Edge on the booth computer. Otherwise, allow microphone access in the address bar and try again.'); return; }
   const list = await refreshDevices();
   inputsEnabled = true;
   document.getElementById('enable').textContent = 'Refresh inputs';
@@ -985,6 +1044,9 @@ document.getElementById('enable').addEventListener('click', async () => {
 });
 if (navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', () => { if (inputsEnabled) refreshDevices(); });
 
+document.getElementById('demoAll').addEventListener('click', async () => {
+  for (const p of panelList) { if (![...p.devSel.options].some(o => o.value === DEMO_ID)) continue; p.devSel.value = DEMO_ID; await p.start(); }
+});
 document.getElementById('resetAll').addEventListener('click', () => { panelList.forEach(p => p.resetStats()); logEvent('All', 'info', 'All measurements reset'); });
 document.getElementById('clearLog').addEventListener('click', () => { logEntries.length = 0; document.getElementById('log').innerHTML = ''; });
 document.getElementById('exportLog').addEventListener('click', () => {
